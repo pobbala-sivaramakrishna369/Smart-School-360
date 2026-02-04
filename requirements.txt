@@ -2,3 +2,5 @@ opencv-python-headless
 streamlit
 pandas
 plotly
+streamlit-webrtc
+av
