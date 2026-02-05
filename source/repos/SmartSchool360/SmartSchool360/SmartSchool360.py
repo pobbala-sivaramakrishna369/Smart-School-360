@@ -3,141 +3,129 @@ import pandas as pd
 import sqlite3
 import cv2
 import numpy as np
-import plotly.express as px
-from datetime import datetime
-import logging
 from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-import anthropic
 
-# --- 1. ENTERPRISE CORE & LOGGING ---
-logging.basicConfig(level=logging.INFO)
-# Make sure to add your ANTHROPIC_API_KEY in Streamlit Secrets
-client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-
-class SmartSchool360:
-    def __init__(self, db_name='smart_school_360_ultimate.db'):
+# --- 1. DATABASE MANAGEMENT ---
+class SchoolDatabase:
+    def __init__(self, db_name='school_intelligence.db'):
         self.conn = sqlite3.connect(db_name, check_same_thread=False)
-        self.init_tables()
+        self.setup_tables()
 
-    def init_tables(self):
+    def setup_tables(self):
         with self.conn:
-            # Student Data Table
-            self.conn.execute('''CREATE TABLE IF NOT EXISTS students 
-                (id INTEGER PRIMARY KEY, name TEXT, attendance REAL, 
-                math INTEGER, science INTEGER, english INTEGER, fee_status TEXT)''')
-            # Career Logs Table (Updated for AI Insights)
-            self.conn.execute('''CREATE TABLE IF NOT EXISTS career_logs 
-                (id INTEGER PRIMARY KEY, student_name TEXT, suggested_course TEXT, insights TEXT, date TEXT)''')
-    
-    def add_student(self, data):
-        with self.conn:
-            self.conn.execute("INSERT INTO students (name, attendance, math, science, english, fee_status) VALUES (?,?,?,?,?,?)", data)
+            self.conn.execute('''CREATE TABLE IF NOT EXISTS student_data 
+                (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                 name TEXT, 
+                 math_score INTEGER, 
+                 science_score INTEGER, 
+                 english_score INTEGER)''')
 
-    def log_career_suggestion(self, name, course, insights):
-        with self.conn:
-            self.conn.execute("INSERT INTO career_logs (student_name, suggested_course, insights, date) VALUES (?,?,?,?)", 
-                              (name, course, insights, datetime.now().strftime("%Y-%m-%d")))
+db = SchoolDatabase()
 
-db = SmartSchool360()
+# --- 2. VISION SCANNER (FACE DETECTION) ---
+class FaceAnalysisTransformer(VideoTransformerBase):
+    def __init__(self):
+        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
-# --- 2. AI ATTENDANCE (Cloud-Compatible Vision) ---
-class FaceDetector(VideoTransformerBase):
     def transform(self, frame):
         img = frame.to_ndarray(format="bgr24")
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
+        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
+        
         for (x, y, w, h) in faces:
             cv2.rectangle(img, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            cv2.putText(img, "Scanning Identity...", (x, y-10), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         return img
 
-# --- 3. UI CONFIGURATION ---
-st.set_page_config(page_title="Smart School 360 | Anthropic Edition", layout="wide")
+# --- 3. PAGE CONFIGURATION ---
+st.set_page_config(page_title="Smart School 360", layout="wide")
 
-if 'auth' not in st.session_state:
-    st.session_state['auth'] = False
+if 'is_authenticated' not in st.session_state:
+    st.session_state['is_authenticated'] = False
 
-# Authentication Layer
-if not st.session_state['auth']:
-    st.title("🛡️ Smart School 360 Global Gateway")
-    u, p = st.text_input("Admin ID"), st.text_input("Access Key", type="password")
+# --- 4. AUTHENTICATION UI ---
+if not st.session_state['is_authenticated']:
+    st.title("🛡️ Secure Administrator Portal")
+    admin_id = st.text_input("Administrator ID")
+    access_key = st.text_input("Access Key", type="password")
+    
     if st.button("Authenticate"):
-        if u == "admin" and p == "master2026":
-            st.session_state['auth'] = True
+        if admin_id == "admin" and access_key == "master2026":
+            st.session_state['is_authenticated'] = True
             st.rerun()
+        else:
+            st.error("Authentication Failed: Invalid Credentials")
+
+# --- 5. MAIN APPLICATION ---
 else:
-    st.sidebar.title("🏫 Smart School 360")
-    st.sidebar.info("Admin: Sivarama Krishna")
-    menu = ["📊 Dashboard", "🧬 AI Attendance", "📂 Student Records", "🚀 Smart Career AI (Claude)", "🚪 Logout"]
-    choice = st.sidebar.radio("Command Center", menu)
+    st.sidebar.title("🏫 Operations Control")
+    app_mode = ["Dashboard", "AI Vision Scanner", "Add Records", "Career Analytics", "Logout"]
+    selection = st.sidebar.radio("Navigation Menu", app_mode)
 
-    # --- 4. DASHBOARD ---
-    if choice == "📊 Dashboard":
-        st.title("🌍 360° Intelligence Overview")
-        df = pd.read_sql_query("SELECT * FROM students", db.conn)
-        if not df.empty:
-            st.metric("Total Students Engaged", len(df))
-            fig = px.bar(df, x="name", y=["math", "science", "english"], barmode="group")
-            st.plotly_chart(fig, use_container_width=True)
+    # --- DASHBOARD ---
+    if selection == "Dashboard":
+        st.title("📊 Student Performance Overview")
+        data = pd.read_sql_query("SELECT * FROM student_data", db.conn)
+        if not data.empty:
+            st.dataframe(data, use_container_width=True)
+            st.bar_chart(data.set_index('name')[['math_score', 'science_score', 'english_score']])
         else:
-            st.warning("No records found. Please add students in 'Student Records'.")
+            st.info("The database is currently empty. Please register students.")
 
-    # --- 5. AI ATTENDANCE (Fixed for Streamlit Cloud) ---
-    elif choice == "🧬 AI Attendance":
-        st.title("📸 AI Vision Scanner")
-        st.info("Using WebRTC for Cloud-Based Face Detection. Please allow camera access.")
-        webrtc_streamer(key="attendance-scanner", video_transformer_factory=FaceDetector)
+    # --- CAMERA / VISION ---
+    elif selection == "AI Vision Scanner":
+        st.title("📸 Facial Recognition Attendance")
+        st.write("Ensuring identity verification through computer vision.")
+        webrtc_streamer(key="vision-scanner", video_transformer_factory=FaceAnalysisTransformer)
 
-    # --- 6. STUDENT RECORDS ---
-    elif choice == "📂 Student Records":
-        st.title("📝 Data Management")
-        with st.form("add_student"):
-            name = st.text_input("Student Name")
-            m = st.number_input("Math Score", 0, 100)
-            s = st.number_input("Science Score", 0, 100)
-            e = st.number_input("English Score", 0, 100)
-            if st.form_submit_button("Save Record"):
-                db.add_student((name, 100, m, s, e, "Paid"))
-                st.success(f"Record for {name} saved successfully!")
-
-    # --- 7. SMART CAREER AI (Anthropic Integration) ---
-    elif choice == "🚀 Smart Career AI (Claude)":
-        st.title("🚀 AI Career Path Recommender")
-        st.markdown("This module uses **Anthropic Claude AI** to analyze scores and suggest Coursera paths.")
-        
-        df = pd.read_sql_query("SELECT * FROM students", db.conn)
-        if not df.empty:
-            selected_student = st.selectbox("Select Student for AI Analysis", df['name'])
-            student_data = df[df['name'] == selected_student].iloc[0]
+    # --- ADD RECORDS ---
+    elif selection == "Add Records":
+        st.title("📝 Student Enrollment")
+        with st.form("enroll_form"):
+            s_name = st.text_input("Student Full Name")
+            m_mark = st.number_input("Mathematics", 0, 100)
+            s_mark = st.number_input("Science", 0, 100)
+            e_mark = st.number_input("English", 0, 100)
             
-            if st.button("Generate AI Insights"):
-                with st.spinner("Claude AI is analyzing performance..."):
-                    # Constructing the AI Prompt
-                    prompt = f"""
-                    Analyze this student's performance:
-                    Name: {selected_student}
-                    Math: {student_data['math']}, Science: {student_data['science']}, English: {student_data['english']}.
-                    Provide a personalized career suggestion and a brief motivation quote. 
-                    Keep the tone professional and encouraging.
-                    """
+            if st.form_submit_button("Save Student Profile"):
+                with db.conn:
+                    db.conn.execute("INSERT INTO student_data (name, math_score, science_score, english_score) VALUES (?,?,?,?)", 
+                                  (s_name, m_mark, s_mark, e_mark))
+                st.success(f"Profile for {s_name} has been secured in the database.")
 
-                    message = client.messages.create(
-                        model="claude-3-5-sonnet-20240620",
-                        max_tokens=500,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    
-                    ai_response = message.content[0].text
-                    st.subheader(f"AI Recommendations for {selected_student}")
-                    st.success(ai_response)
-                    
-                    # Log the suggestion to database
-                    db.log_career_suggestion(selected_student, "Claude Analysis", ai_response)
-                    st.info("Insights have been logged to the database.")
+    # --- CAREER LOGIC (ALGORITHMIC) ---
+    elif selection == "Career Analytics":
+        st.title("🚀 Career Recommendation Engine")
+        data = pd.read_sql_query("SELECT * FROM student_data", db.conn)
+        if not data.empty:
+            target_student = st.selectbox("Select Student Profile", data['name'])
+            profile = data[data['name'] == target_student].iloc[0]
+            
+            if st.button("Generate Recommendation"):
+                m, s, e = profile['math_score'], profile['science_score'], profile['english_score']
+                
+                # Custom Intelligent Logic
+                if m >= 90 and s >= 85:
+                    path = "Quantum Computing & Advanced Mathematics"
+                    insight = "Exceptional analytical skills detected in core STEM fields."
+                elif s >= 90:
+                    path = "Biomedical Engineering or Space Science"
+                    insight = "High aptitude for scientific research and exploration."
+                elif e >= 85:
+                    path = "Corporate Communications or International Law"
+                    insight = "Strong linguistic and interpersonal capabilities identified."
+                else:
+                    path = "Technology Management & Systems Analysis"
+                    insight = "Balanced profile suitable for multi-disciplinary technology roles."
+                
+                st.subheader(f"Results for {target_student}")
+                st.success(f"Recommended Domain: {path}")
+                st.info(f"Analytical Insight: {insight}")
         else:
-            st.error("No student data available for analysis.")
+            st.warning("No data found. Please enroll students first.")
 
-    # --- 8. LOGOUT ---
-    elif choice == "🚪 Logout":
-        st.session_state['auth'] = False
+    # --- LOGOUT ---
+    elif selection == "Logout":
+        st.session_state['is_authenticated'] = False
         st.rerun()
