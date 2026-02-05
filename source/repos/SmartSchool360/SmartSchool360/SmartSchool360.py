@@ -77,7 +77,13 @@ else:
     elif selection == "AI Vision Scanner":
         st.title("📸 Facial Recognition Attendance")
         st.write("Ensuring identity verification through computer vision.")
-        webrtc_streamer(key="vision-scanner", video_transformer_factory=FaceAnalysisTransformer)
+        webrtc_streamer(
+            key="vision-scanner", 
+            video_transformer_factory=FaceAnalysisTransformer,
+            rtc_configuration={
+                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
+            }
+        )
 
     # --- ADD RECORDS ---
     elif selection == "Add Records":
